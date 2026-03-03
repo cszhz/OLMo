@@ -110,8 +110,70 @@ except Exception as e:
     traceback.print_exc()
     sys.exit(1)
 
+# 5. 测试 generate() 方法（可选 - 需要已编译的模型）
+print("\n5. 测试 generate() 方法...")
+import os
+compiled_model_path = "/tmp/olmo2_neuron_test"
+
+if os.path.exists(os.path.join(compiled_model_path, "model.pt")):
+    print("   发现已编译模型，测试 generate()...")
+    try:
+        from transformers import AutoTokenizer
+
+        # 创建配置（TP=2 与编译时匹配）
+        neuron_config = Olmo2NeuronConfig(
+            tp_degree=2,
+            batch_size=1,
+            seq_len=128,
+            torch_dtype=torch.float32,
+        )
+        neuron_config.buckets = [128]
+
+        config_kwargs["neuron_config"] = neuron_config
+        config = Olmo2InferenceConfig(**config_kwargs)
+
+        # 加载模型
+        print("   加载编译模型...")
+        model = NeuronOlmo2ForCausalLM(
+            model_path=model_path,
+            config=config,
+        )
+        model.load(compiled_model_path)
+        print("   ✓ 模型加载成功")
+
+        # 加载 tokenizer
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+        # 测试 generate
+        print("   测试 generate() 方法...")
+        prompt = "Language modeling is"
+        inputs = tokenizer(prompt, return_tensors='pt', return_token_type_ids=False)
+
+        with torch.no_grad():
+            outputs = model.generate(
+                input_ids=inputs['input_ids'],
+                max_new_tokens=5,
+                pad_token_id=tokenizer.pad_token_id,
+                do_sample=False,
+            )
+
+        generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        print(f"   输入: '{prompt}'")
+        print(f"   输出: '{generated_text}'")
+        print("   ✓ generate() 方法测试成功")
+
+    except Exception as e:
+        print(f"   ✗ generate() 测试失败: {e}")
+        import traceback
+        traceback.print_exc()
+        print("   (这不影响基础功能测试)")
+else:
+    print(f"   跳过（编译模型不存在: {compiled_model_path}）")
+    print("   提示：先运行编译以测试 generate() 方法")
+
 print("\n" + "=" * 60)
-print("✓ 所有测试通过！")
+print("✓ 基础测试全部通过！")
 print("=" * 60)
-print("\n下一步：运行编译脚本")
-print("命令：python3 compile_olmo2_neuron.py --tp-degree 2 --batch-size 1")
+print("\n下一步：")
+print("1. 编译模型：python3 compile_olmo2_neuron.py --model-path allenai/OLMo-2-0425-1B --compiled-model-path /tmp/olmo2_neuron_test --tp-degree 2 --batch-size 1 --n-positions 128 --buckets '[128]'")
+print("2. 推理测试：python3 compile_olmo2_neuron.py --inference-only --model-path allenai/OLMo-2-0425-1B --compiled-model-path /tmp/olmo2_neuron_test --tp-degree 2 --batch-size 1 --n-positions 128 --prompt 'Test' --max-new-tokens 10")
