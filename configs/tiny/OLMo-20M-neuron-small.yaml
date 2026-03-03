@@ -1,0 +1,97 @@
+run_name: OLMo-20M-neuron-small
+seed: 6198
+dry_run: false
+
+wandb: null
+
+# Neuron优化配置 - 减小计算图
+distributed_strategy: single
+
+model:
+  d_model: 128  # 从256减到128
+  n_heads: 4    # 从8减到4
+  n_layers: 4   # 从8减到4
+  mlp_ratio: 4  # 从8减到4
+  weight_tying: false
+  alibi: false
+  rope: true
+  flash_attention: false  # 禁用flash attention，简化计算图
+  attention_dropout: 0.0
+  attention_layer_norm: false
+  clip_qkv: null
+  include_bias: false
+  block_type: sequential
+  layer_norm_type: rms
+  layer_norm_with_affine: true
+  layer_norm_eps: 1e-6
+  bias_for_layer_norm: false
+  attention_layer_norm_with_affine: false
+  activation_type: swiglu
+  residual_dropout: 0.0
+  embedding_dropout: 0.0
+  max_sequence_length: 256  # 从512进一步减到256 - 关键修改！
+  vocab_size: 100278
+  embedding_size: 100352
+  eos_token_id: 100257
+  pad_token_id: 1
+  init_device: cpu
+  init_fn: mitchell
+  init_cutoff_factor: 3.0
+  norm_after: false
+
+compile: null
+
+optimizer:
+  name: adamw
+  learning_rate: 4.0e-4
+  weight_decay: 0.1
+  betas:
+  - 0.9
+  - 0.95
+
+scheduler:
+  name: cosine_with_warmup
+  t_warmup: 2000
+  alpha_f: 0.1
+
+tokenizer:
+  identifier: olmo_data/tokenizers/allenai_dolma2.json
+  truncate_direction: right
+
+save_folder: workspace/${run_name}
+save_overwrite: true
+save_interval: 20
+save_interval_unsharded: 20
+save_num_checkpoints_to_keep: -1
+save_num_unsharded_checkpoints_to_keep: 2
+
+load_path: null
+
+# 更小的batch size - 关键调整
+max_duration: 50
+global_train_batch_size: 16  # 从64减到16
+device_train_microbatch_size: 1  # 从4减到1 (最小值)
+
+precision: amp_fp16  # 改回fp16，bf16可能有问题
+
+max_grad_norm: 1.0
+max_grad_norm_ratio: null
+
+speed_monitor:
+  window_size: 100
+
+eval_interval: 50
+eval_subset_num_batches: -1
+device_eval_batch_size: 8  # 减小评估batch
+evaluators: []
+
+data:
+  pad_direction: right
+  num_workers: 2  # 减少workers
+  drop_last: true
+  pin_memory: false
+  prefetch_factor: 2
+  persistent_workers: true
+  timeout: 0
+  paths:
+    - /home/ubuntu/part-00-00000.npy

@@ -1,0 +1,99 @@
+run_name: OLMo-20M-neuron-16x
+seed: 6198
+dry_run: false
+
+wandb: null
+
+# For XLA/Neuron multi-process training, use single strategy
+# Each process runs its own model copy, XLA handles gradient sync
+distributed_strategy: single
+
+model:
+  d_model: 256
+  n_heads: 8
+  n_layers: 8
+  mlp_ratio: 8
+  weight_tying: false
+  alibi: false
+  rope: true
+  flash_attention: true
+  attention_dropout: 0.0
+  attention_layer_norm: false
+  clip_qkv: null
+  include_bias: false
+  block_type: sequential
+  layer_norm_type: rms
+  layer_norm_with_affine: true
+  layer_norm_eps: 1e-6
+  bias_for_layer_norm: false
+  attention_layer_norm_with_affine: false
+  activation_type: swiglu
+  residual_dropout: 0.0
+  embedding_dropout: 0.0
+  max_sequence_length: 2048
+  vocab_size: 100278
+  embedding_size: 100352
+  eos_token_id: 100257
+  pad_token_id: 1
+  init_device: cpu  # Initialize on CPU, then move to XLA
+  init_fn: mitchell
+  init_cutoff_factor: 3.0
+  norm_after: false
+
+compile: null
+
+optimizer:
+  name: adamw
+  learning_rate: 4.0e-4
+  weight_decay: 0.1
+  betas:
+  - 0.9
+  - 0.95
+
+scheduler:
+  name: cosine_with_warmup
+  t_warmup: 2000
+  alpha_f: 0.1
+
+tokenizer:
+  identifier: olmo_data/tokenizers/allenai_dolma2.json
+  truncate_direction: right
+
+save_folder: workspace/${run_name}
+save_overwrite: true
+save_interval: 50
+save_interval_unsharded: 50
+save_num_checkpoints_to_keep: -1
+save_num_unsharded_checkpoints_to_keep: 2
+
+load_path: null
+
+# Total batch size across all 16 processes
+# 2048 / 16 = 128 per process
+max_duration: 50
+global_train_batch_size: 512 #2048
+device_train_microbatch_size: 2 #8
+
+precision: amp_fp16
+
+max_grad_norm: 1.0
+max_grad_norm_ratio: null
+
+speed_monitor:
+  window_size: 100
+
+eval_interval: 50
+eval_subset_num_batches: -1
+device_eval_batch_size: 2 #16
+evaluators: []
+
+data:
+  pad_direction: right
+  num_workers: 4
+  drop_last: true
+  pin_memory: false  # XLA doesn't need pinned memory
+  prefetch_factor: 2
+  persistent_workers: true
+  timeout: 0
+  paths:
+    - /home/ubuntu/part-00-00000.npy
