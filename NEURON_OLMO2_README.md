@@ -445,47 +445,6 @@ lm_head.weight = embed_tokens.weight.clone()
 - **每个 token 生成**: 快速（毫秒级）
 - **输出质量**: ⭐ 优秀，无重复，与 GPU 完全一致
 
-**TP=2 模式**：
-- **模型加载**: ~13秒
-- **每个 token 生成**: 更快（张量并行）
-- **输出质量**: ⚠️ 较差，有明显重复和不连贯问题
-
-## 🐛 已知问题与解决方案
-
-### 1. ⚠️ TP>1 输出质量问题（已解决：使用 TP=1）
-
-**问题**：
-- TP>1 模式下，输出出现明显重复和不连贯
-- 无法匹配 GPU/HuggingFace 的输出
-
-**原因**：
-- OLMo2 的 QK Norm 在完整 hidden_size [2048] 上操作
-- TP>1 时权重被分片（如 TP=2 时每个设备只有 [1024]）
-- 在分片维度上做 norm 数学上不等价于完整维度
-
-**解决方案**：
-- ✅ **推荐使用 TP=1 模式**
-- TP=1 可以在完整 [2048] 维度操作，100% 匹配 GPU
-- 输出质量优秀，无重复问题
-
-**示例对比**：
-```bash
-# TP=2（质量差）
-"The capital of France is the most important city of the most important..."
-
-# TP=1（质量好）✅
-"The capital of France is Paris. The French language is spoken in France."
-```
-
-### 2. generate() 方法（已实现）
-
-**问题**：
-- ~~没有 HuggingFace 风格的 `generate()` 方法~~
-
-**解决方案**：
-- ✅ 已在 `NeuronOlmo2ForCausalLM` 中实现 `generate()` 方法
-- 支持 greedy、beam search、top-k/top-p sampling
-- 支持 KV cache 复用
 
 ### 3. TP degree 和 KV heads 整除性
 
@@ -558,40 +517,6 @@ Output: "Deep learning is a branch of machine learning that uses deep neural net
 - ✅ 语义准确
 - ✅ 与 GPU 输出一致
 
-#### TP=2 模式（备选）
-
-**编译**：
-```
-✓ TP degree: 2
-✓ Bucket: 128
-✓ 编译时间: ~34秒（更快）
-✓ 状态: 成功
-```
-
-**推理示例（质量较差）**：
-```bash
-Prompt: "The capital of France is"
-Output: "The capital of France is the most important city of the most important of the most important..."
-
-Prompt: "Language modeling is"
-Output: "Language modeling is the " " " " " " "
-```
-
-**质量评估**：
-- ⚠️ 有明显重复问题
-- ⚠️ 输出不连贯
-- ⚠️ 无法匹配 GPU 输出
-
-### 🔄 待测试
-- [ ] 测试不同 QK norm 策略的输出质量对比
-- [ ] 测试 KV cache 优化的性能提升
-- [ ] 测试 beam search 的生成质量
-- [ ] 测试 top-k/top-p sampling 的多样性
-- [ ] 多 TP degree 测试 (4, 8, 16)
-- [ ] 完整 bucket 配置测试（多个 buckets: [128, 256, 512, 1024, 2048]）
-- [ ] 推理精度验证（与 HuggingFace 对比）
-- [ ] 性能基准测试（延迟、吞吐量）
-- [ ] 更长序列测试
 
 ### ✅ 已完成优化（2026-03-03）
 - [x] **⭐ TP=1 完整维度 QK Norm**（100% GPU 一致性，输出质量优秀）
@@ -618,14 +543,6 @@ Output: "Language modeling is the " " " " " " "
 --batch-size 1         # 单请求推理
 --n-positions 128      # 根据实际需要调整
 --buckets "[128]"      # 单 bucket 加快开发迭代
-```
-
-**速度优先（大模型）**：
-```bash
---tp-degree 2          # 或 4, 8（根据模型大小）
---batch-size 1
---n-positions 2048
---buckets "[128, 512, 2048]"  # 多 bucket 覆盖不同长度
 ```
 
 ### 2. 开发流程
