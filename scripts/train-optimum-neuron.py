@@ -146,6 +146,93 @@ class OLMoNeuronTrainer(NeuronTrainer):
 
         return (loss, outputs) if return_outputs else loss
 
+    def _save_checkpoint(self):
+        """Override checkpoint saving to avoid multi-process Neuron Runtime bug.
+
+        The bug: Neuron Runtime crashes during collective communication when saving
+        checkpoints in multi-process training with assertion error:
+        'Assertion `it != bootstrap_participants.end()' failed'
+
+        Workaround: Only save on rank 0 and disable distributed checkpoint features.
+        """
+        # Get current rank
+        import torch.distributed as dist
+        if dist.is_initialized():
+            local_rank = dist.get_rank()
+        else:
+            local_rank = 0
+
+        # Only save on rank 0 to avoid collective communication
+        if local_rank != 0:
+            # Non-primary ranks: skip saving
+            return
+
+        # For rank 0: call parent's save but with safe settings
+        checkpoint_folder = f"{self.args.output_dir}/checkpoint-{self.state.global_step}"
+
+        # Save model using our custom save method that avoids collectives
+        self._save_model_safe(checkpoint_folder)
+
+        # Save optimizer, scheduler, and trainer state (rank 0 only)
+        if self.args.should_save:
+            import os
+            os.makedirs(checkpoint_folder, exist_ok=True)
+
+            # Save trainer state
+            self.state.save_to_json(os.path.join(checkpoint_folder, "trainer_state.json"))
+
+            # Save optimizer state
+            optimizer_path = os.path.join(checkpoint_folder, "optimizer.pt")
+            torch.save(self.optimizer.state_dict(), optimizer_path)
+
+            # Save scheduler state
+            scheduler_path = os.path.join(checkpoint_folder, "scheduler.pt")
+            torch.save(self.lr_scheduler.state_dict(), scheduler_path)
+
+            # Save training args
+            torch.save(self.args, os.path.join(checkpoint_folder, "training_args.bin"))
+
+            print(f"Checkpoint saved to {checkpoint_folder}")
+
+    def _save_model_safe(self, output_dir):
+        """Safely save model on rank 0 only, avoiding collective communication."""
+        import torch.distributed as dist
+        if dist.is_initialized() and dist.get_rank() != 0:
+            return
+
+        import os
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Get the underlying model (unwrap if needed)
+        model_to_save = self.model
+        if hasattr(model_to_save, 'module'):
+            model_to_save = model_to_save.module
+
+        # Use our wrapper's save_pretrained which is safe for single process
+        if hasattr(model_to_save, 'save_pretrained'):
+            model_to_save.save_pretrained(
+                output_dir,
+                is_main_process=True,
+                state_dict=model_to_save.state_dict() if hasattr(model_to_save, 'state_dict') else None,
+                save_function=torch.save,
+            )
+        else:
+            # Fallback: save state dict directly
+            torch.save(
+                model_to_save.state_dict(),
+                os.path.join(output_dir, "pytorch_model.bin")
+            )
+
+    def save_model(self, output_dir=None, _internal_call=False):
+        """Override save_model to only save on rank 0."""
+        import torch.distributed as dist
+        if dist.is_initialized() and dist.get_rank() != 0:
+            # Non-primary ranks: skip
+            return
+
+        output_dir = output_dir if output_dir is not None else self.args.output_dir
+        self._save_model_safe(output_dir)
+
 
 def main(cfg: TrainConfig) -> None:
     """Main training function using optimum-neuron."""
